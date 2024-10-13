@@ -10,16 +10,27 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"slices"
 	"strings"
 )
 
 var (
-	rootDir  = os.Getenv("PT_DIR")
-	fallback = os.Getenv("PT_FALLBACK")
+	rootDir = os.Getenv("PT_DIR")
 
-	authKey    = os.Getenv("PT_AUTH")
-	urlBase    = os.Getenv("PT_BASE")
-	serverAddr = os.Getenv("PT_ADDR")
+	authKey      = os.Getenv("PT_AUTH")
+	serverAddr   = os.Getenv("PT_ADDR")
+	specialCodes = []string{scRoot, scList, scFallback}
+)
+
+// Special codes
+const (
+	// .list is not a code file, but a special code to list all codes.
+	scList = ".list"
+	// root and fallback are actually code files, but can't be set via the API.
+	// Set them manually on server. `.root` is the target for the root path.
+	// `.fallback` is the target for non-existent codes.
+	scRoot     = ".root"
+	scFallback = ".fallback"
 )
 
 func err500(w http.ResponseWriter, err error) bool {
@@ -72,7 +83,7 @@ func listPages(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			link.Target = "read error: " + err.Error()
 		} else {
-			link.Target = string(strings.TrimSpace(string(target)))
+			link.Target = strings.TrimSpace(string(target))
 		}
 		links = append(links, link)
 	}
@@ -90,17 +101,29 @@ func listPages(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func getFallback() string {
+	target, err := os.ReadFile(path.Join(rootDir, scFallback))
+	if err == nil {
+		return strings.TrimSpace(string(target))
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		log.Println("unexpected error when reading fallback:", err)
+	}
+	return ""
+}
+
 func get(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimPrefix(r.URL.Path, "/")
 	if code == "" {
-		code = "root"
+		code = scRoot
 	}
-	if code == ".list" {
+	if code == scList {
 		listPages(w, r)
 		return
 	}
 	target, err := os.ReadFile(path.Join(rootDir, code))
 	if err != nil {
+		fallback := getFallback()
 		if fallback != "" {
 			http.Redirect(w, r, fallback, http.StatusFound)
 			return
@@ -113,7 +136,7 @@ func get(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	http.Redirect(w, r, string(target), http.StatusFound)
+	http.Redirect(w, r, strings.TrimSpace(string(target)), http.StatusFound)
 }
 
 func post(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +148,11 @@ func post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := strings.TrimPrefix(r.URL.Path, "/")
+	if slices.Contains(specialCodes, code) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("403 - cannot use special code\n"))
+		return
+	}
 	if code == "" {
 		var rc [3]byte
 		_, err := rand.Read(rc[:])
@@ -150,9 +178,6 @@ func post(w http.ResponseWriter, r *http.Request) {
 	err = os.WriteFile(f, target, 0644)
 	if err500(w, err) {
 		return
-	}
-	if urlBase != "" {
-		code = urlBase + "/" + code
 	}
 	w.Write([]byte(code + "\n"))
 }
