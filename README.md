@@ -1,8 +1,14 @@
 # ptsrv
 
-*point to - service* - minimalist URL shortener.
+*point to - service* - minimalist URL shortener and permalink database.
 
-## Run with Docker
+## Run
+
+```
+PT_DIR=./pt PT_AUTH=secret go run .
+```
+
+### Docker
 
 ```
 docker run -it \
@@ -13,15 +19,47 @@ docker run -it \
     haflan/ptsrv
 ```
 
-## Usage
+`ptsrv` does not deal with TLS.
+Use a reverse proxy like [Caddy](https://caddyserver.com/) for production.
 
-POST your link to the path you want, or POST to the server root to autogenerate an ID / path. If successful, the server responds with the ID. The auth key can be set in a header or query param.
+## API
+`ptsrv` simply stores (long) URLs in files, so that `https://$HOST/<code>` redirects to the URL found in the file `$PT_DIR/<code>`.
+Files can be maintained manually, but `ptsrv` also has an API for convenience:
 
+    GET /.list?auth=<auth>[&json]       Lists all links and targets
+    POST /[code]?auth=<auth>            Creates new link
+
+**Parameters:**
+
+* `auth`: Query - authentication code (alt: `auth: <auth>` header)
+* `json`: Query - return JSON instead of plaintext (alt: `accept: application/json` header)
+* `code`: Path - requested short code (default: random code)
+
+Updating links is not possible with the API. If the requested code already exists, the server will respond with an error.
+Change the files manually on server if you need to update or delete anything.
+
+### Examples
 ```
-$ curl -H 'auth: secret' -d 'https://example.org' localhost:4600/
+read -s SECRET
+$ curl -H 'auth: $SECRET' -d 'https://example.org' localhost:4600/
 Jv20
-$ curl -d 'https://example.org' localhost:4600/?auth=secret
+$ curl -d 'https://example.org' localhost:4600/?auth=$SECRET
 akG7
-$ curl -d 'https://example.org' localhost:4600/short?auth=secret
+$ curl -d 'https://example.org' localhost:4600/short?auth=$SECRET
 short
+$ curl localhost:4600/.list?auth=$SECRET
+Jv20
+https://example.org
+
+akG7
+https://example.org
+
+short
+https://example.org
+$ curl 'localhost:4600/.list?auth=$SECRET&json'
+[{"code":"Jv20","target":"https://example.org"},{"code":"akG7","target":"https://example.org"},{"code":"short","target":"https://example.org"}]
 ```
+
+## Motivation
+Motivated by the desire to avoid long links and dead links.
+By using `ptsrv` as a central database of permanent it's easy to spot and fix dead links.

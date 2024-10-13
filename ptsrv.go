@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -48,6 +49,11 @@ func auth(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
+type Link struct {
+	Code   string `json:"code"`
+	Target string `json:"target"`
+}
+
 func listPages(w http.ResponseWriter, r *http.Request) {
 	if !auth(w, r) {
 		return
@@ -56,17 +62,30 @@ func listPages(w http.ResponseWriter, r *http.Request) {
 	if err500(w, err) {
 		return
 	}
+	var links []Link
 	for _, f := range d {
 		if f.IsDir() {
 			continue
 		}
-		w.Write([]byte(f.Name() + "\n"))
 		target, err := os.ReadFile(path.Join(rootDir, f.Name()))
-		target = []byte(strings.TrimSpace(string(target)))
+		link := Link{Code: f.Name()}
 		if err != nil {
-			w.Write([]byte("read error" + err.Error() + "\n\n"))
+			link.Target = "read error: " + err.Error()
 		} else {
-			w.Write(append(target, []byte("\n\n")...))
+			link.Target = string(strings.TrimSpace(string(target)))
+		}
+		links = append(links, link)
+	}
+	if r.URL.Query().Has("json") || r.Header.Get("Accept") == "application/json" {
+		w.Header().Set("Content-Type", "application/json")
+		out, err := json.Marshal(links)
+		if err != nil {
+			err500(w, err)
+		}
+		w.Write(out)
+	} else {
+		for _, l := range links {
+			w.Write([]byte(l.Code + "\n" + l.Target + "\n\n"))
 		}
 	}
 }
