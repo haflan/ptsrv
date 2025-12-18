@@ -8,6 +8,14 @@
 PT_DIR=./pt PT_AUTH=secret go run .
 ```
 
+**Pushover notifications**
+
+If `PUSHOVER_CREDENTIALS` is defined and the notify directory exists (defined by `$PT_NOTIFY_DIR` - default: `$PT_DIR/.notify`),
+notifications to the given Pushover account can be activated on link-by-link basis by touching files in the notify directory.
+For instance, to notify on requests to `h5.pt/test`: `touch ${PT_NOTIFY_DIR}/test` in the notify dir.
+
+
+
 ### Docker
 
 ```
@@ -21,6 +29,7 @@ docker run -it \
 
 `ptsrv` does not deal with TLS.
 Use a reverse proxy like [Caddy](https://caddyserver.com/) for production.
+
 
 ## API
 `ptsrv` simply stores (long) URLs in files, so that `https://$HOST/<code>` redirects to the URL found in the file `$PT_DIR/<code>`.
@@ -62,4 +71,4 @@ $ curl 'localhost:4600/.list?auth=$SECRET&json'
 
 ## Motivation
 Motivated by the desire to avoid long links and dead links.
-By using `ptsrv` as a central database of permanent it's easy to spot and fix dead links.
+By using `ptsrv` as a central database of long-lived links it's easy to spot and fix dead ones.

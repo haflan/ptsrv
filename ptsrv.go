@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"slices"
@@ -17,9 +18,15 @@ import (
 var (
 	rootDir = os.Getenv("PT_DIR")
 
+	// Directory with per link notification webhook URL
+	notifyDir = os.Getenv("PT_NOTIFY_DIR")
+
 	authKey      = os.Getenv("PT_AUTH")
 	serverAddr   = os.Getenv("PT_ADDR")
-	specialCodes = []string{scRoot, scList, scFallback}
+	specialCodes = []string{scRoot, scList, scFallback, scDefaultNotifyDir}
+
+	pushoverCredentials         = os.Getenv("PUSHOVER_CREDENTIALS")
+	pushoverUser, pushoverToken string
 )
 
 // Special codes
@@ -29,9 +36,39 @@ const (
 	// root and fallback are actually code files, but can't be set via the API.
 	// Set them manually on server. `.root` is the target for the root path.
 	// `.fallback` is the target for non-existent codes.
-	scRoot     = ".root"
-	scFallback = ".fallback"
+	scRoot             = ".root"
+	scFallback         = ".fallback"
+	scDefaultNotifyDir = ".notify"
 )
+
+func init() {
+	if pushoverCredentials != "" {
+		creds := strings.Split(strings.TrimSpace(pushoverCredentials), ":")
+		if len(creds) != 2 {
+			log.Fatalln("PUSHOVER_CREDENTIALS must be on the format 'user:token'")
+		}
+		pushoverUser, pushoverToken = creds[0], creds[1]
+		log.Println("Pushover configured")
+	}
+
+	// If no notify dir is set, check if <root>/.notify exists and use it if so
+	if notifyDir == "" {
+		dnd := path.Join(rootDir, scDefaultNotifyDir)
+		fi, err := os.Stat(dnd)
+		if err != nil || !fi.IsDir() {
+			return
+		}
+		notifyDir = dnd
+	}
+	fi, err := os.Stat(notifyDir)
+	if err != nil {
+		log.Fatalln("PT_NOTIFY_DIR invalid:", notifyDir)
+	}
+	if !fi.IsDir() {
+		log.Fatalln("PT_NOTIFY_DIR invalid: not a directory")
+	}
+	log.Println("using notify dir", notifyDir)
+}
 
 func err500(w http.ResponseWriter, err error) bool {
 	if err == nil {
@@ -112,6 +149,30 @@ func getFallback() string {
 	return ""
 }
 
+func notify(code string) {
+	// If a file with the code exists in notifyDir, send a notification
+	urlFile := path.Join(notifyDir, code)
+	if _, err := os.Stat(urlFile); os.IsNotExist(err) {
+		return
+	}
+
+	resp, err := http.PostForm("https://api.pushover.net/1/messages.json", url.Values{
+		"title":   {"ptsrv received a request"},
+		"message": {"code: " + code},
+		"user":    {pushoverUser},
+		"token":   {pushoverToken},
+		"retry":   {"30"},
+		"expire":  {"120"},
+	})
+	if err != nil {
+		log.Println("notification failed with error:", err)
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Println("notification failed: http status:", resp.StatusCode)
+	}
+}
+
 func get(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimPrefix(r.URL.Path, "/")
 	if code == "" {
@@ -120,6 +181,9 @@ func get(w http.ResponseWriter, r *http.Request) {
 	if code == scList {
 		listPages(w, r)
 		return
+	}
+	if notifyDir != "" {
+		go notify(code)
 	}
 	target, err := os.ReadFile(path.Join(rootDir, code))
 	if err != nil {
