@@ -152,13 +152,18 @@ func getFallback() string {
 func notify(code string) {
 	// If a file with the code exists in notifyDir, send a notification
 	urlFile := path.Join(notifyDir, code)
-	if _, err := os.Stat(urlFile); os.IsNotExist(err) {
+	contents, err := os.ReadFile(urlFile)
+	if err != nil {
 		return
+	}
+	message := strings.TrimSpace(string(contents))
+	if message == "" {
+		message = "code: " + code
 	}
 
 	resp, err := http.PostForm("https://api.pushover.net/1/messages.json", url.Values{
 		"title":   {"ptsrv received a request"},
-		"message": {"code: " + code},
+		"message": {message},
 		"user":    {pushoverUser},
 		"token":   {pushoverToken},
 		"retry":   {"30"},
